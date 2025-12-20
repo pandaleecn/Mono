@@ -1,0 +1,65 @@
+# Mono 听书播放器 - AI 开发规则
+
+## 项目概述
+这是一个 iOS 听书播放器，使用 Swift + UIKit 纯代码开发，无 Storyboard。
+
+## 技术栈
+- Swift 5
+- UIKit（纯代码布局）
+- AVFoundation（音频播放）
+- UserDefaults（状态持久化）
+- 最低支持 iOS 15.0
+
+## 架构模式
+- 单例模式：AudioPlayerManager、FileService、PlaybackStateManager
+- Delegate 模式：AudioPlayerDelegate 用于播放状态回调
+- MVC：ViewController 直接管理 View 和数据
+
+## 代码规范
+
+### 文件组织
+- Models/：数据模型（AudioTrack, AudioFolder）
+- Services/：业务逻辑服务（单例）
+- Views/：ViewController 和自定义 View
+- Extensions/：Swift 扩展
+
+### 命名规范
+- ViewController 后缀：如 FolderListViewController
+- Cell 后缀：如 FolderCell、TrackCell
+- Manager 后缀：如 AudioPlayerManager
+
+### UI 开发规范
+- 使用 lazy var 初始化 UI 组件
+- translatesAutoresizingMaskIntoConstraints = false
+- NSLayoutConstraint.activate([]) 设置约束
+- 使用 // MARK: - 分隔代码区块
+
+### 关键单例访问
+```swift
+AudioPlayerManager.shared  // 播放控制
+FileService.shared         // 文件操作
+PlaybackStateManager.shared // 状态持久化
+```
+
+## 修改指南
+
+### 添加新的 ViewController
+1. 在 Views/ 目录创建文件
+2. 继承 UIViewController
+3. 实现 setupUI() 方法配置界面
+4. 如需列表，实现 UITableViewDataSource 和 UITableViewDelegate
+
+### 添加新的播放功能
+修改 AudioPlayerManager.swift，添加公开方法。
+
+### 添加新的持久化数据
+在 PlaybackStateManager.swift 添加新的 key 和计算属性。
+
+### 添加新的音频格式
+在 FileService.supportedExtensions 数组添加扩展名。
+
+## 注意事项
+- 所有 UI 必须使用纯代码，不使用 Storyboard/XIB
+- 保持代码简洁，避免过度设计
+- 播放状态变化时注意调用 delegate 方法通知 UI 更新
+
