@@ -1,0 +1,5 @@
+MonoAndroid/.gradle
+MonoAndroid/app/build
+MonoAndroid/build
+MonoAndroid/.idea
+MonoAndroid/local.properties
