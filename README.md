@@ -1,8 +1,8 @@
 # Mono - 听书播放器
 
-一个简洁的跨平台有声书播放器，支持 iOS 和 Android。专为听书场景设计，简单易用。
+<img src="UIRes/mono_icon.png" width="120" alt="App Icon" />
 
-![App Icon](UIRes/mono_icon.png)
+一个简洁的跨平台有声书播放器，支持 iOS 和 Android。专为听书场景设计，简单易用。
 
 ## 功能特性
 
