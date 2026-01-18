@@ -66,6 +66,14 @@ final class FolderListViewController: UIViewController {
         
         navigationController?.navigationBar.prefersLargeTitles = true
         
+        // 设置按钮
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "gearshape"),
+            style: .plain,
+            target: self,
+            action: #selector(showSettings)
+        )
+        
         view.addSubview(tableView)
         view.addSubview(emptyLabel)
         
@@ -121,6 +129,11 @@ final class FolderListViewController: UIViewController {
         let hasTrack = AudioPlayerManager.shared.currentTrack != nil
         miniPlayerView.isHidden = !hasTrack
         
+        // 刷新 mini player 内容
+        if hasTrack {
+            miniPlayerView.refreshUI()
+        }
+        
         // 调整 tableView 的 contentInset
         let bottomInset: CGFloat = hasTrack ? 64 : 0
         tableView.contentInset.bottom = bottomInset
@@ -135,6 +148,12 @@ final class FolderListViewController: UIViewController {
             sheet.prefersGrabberVisible = true
         }
         present(playerVC, animated: true)
+    }
+    
+    @objc private func showSettings() {
+        let settingsVC = SettingsViewController()
+        let navController = UINavigationController(rootViewController: settingsVC)
+        present(navController, animated: true)
     }
 }
 

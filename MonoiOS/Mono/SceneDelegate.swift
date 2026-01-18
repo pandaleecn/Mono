@@ -32,6 +32,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // 恢复上次播放状态
         AudioPlayerManager.shared.restorePlayback()
+        
+        // 如果设置了启动时自动播放，则开始播放
+        if PlaybackStateManager.shared.autoPlayOnLaunch,
+           AudioPlayerManager.shared.currentTrack != nil {
+            // 延迟一点执行，确保 UI 和播放器都准备好
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                AudioPlayerManager.shared.play()
+            }
+        }
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {

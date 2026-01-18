@@ -57,12 +57,47 @@ final class TrackListViewController: UIViewController {
         super.viewWillAppear(animated)
         updateMiniPlayerVisibility()
         tableView.reloadData()
+        scrollToLastPlayedTrack()
+    }
+    
+    /// 滚动到上次播放的曲目，使其显示在列表中间
+    private func scrollToLastPlayedTrack() {
+        // 优先滚动到当前正在播放的曲目
+        if let currentTrack = AudioPlayerManager.shared.currentTrack,
+           currentTrack.folderName == folder.name,
+           let index = tracks.firstIndex(of: currentTrack) {
+            scrollToIndex(index)
+            return
+        }
+        
+        // 否则滚动到该文件夹上次播放的曲目
+        if let lastPlayedURL = PlaybackStateManager.shared.getLastPlayedTrack(forFolder: folder.name),
+           let index = tracks.firstIndex(where: { $0.url == lastPlayedURL }) {
+            scrollToIndex(index)
+        }
+    }
+    
+    private func scrollToIndex(_ index: Int) {
+        let indexPath = IndexPath(row: index, section: 0)
+        
+        // 延迟一点执行，确保 tableView 已经完成布局
+        DispatchQueue.main.async {
+            self.tableView.scrollToRow(at: indexPath, at: .middle, animated: false)
+        }
     }
     
     // MARK: - Setup
     private func setupUI() {
         title = folder.name
         view.backgroundColor = .systemBackground
+        
+        // 文件夹设置按钮
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis.circle"),
+            style: .plain,
+            target: self,
+            action: #selector(showFolderSettings)
+        )
         
         view.addSubview(tableView)
         
@@ -108,6 +143,11 @@ final class TrackListViewController: UIViewController {
         let hasTrack = AudioPlayerManager.shared.currentTrack != nil
         miniPlayerView.isHidden = !hasTrack
         
+        // 刷新 mini player 内容
+        if hasTrack {
+            miniPlayerView.refreshUI()
+        }
+        
         let bottomInset: CGFloat = hasTrack ? 64 : 0
         tableView.contentInset.bottom = bottomInset
         tableView.scrollIndicatorInsets.bottom = bottomInset
@@ -122,6 +162,193 @@ final class TrackListViewController: UIViewController {
         }
         present(playerVC, animated: true)
     }
+    
+    // MARK: - Folder Settings
+    @objc private func showFolderSettings() {
+        let settings = PlaybackStateManager.shared
+        let skipIntro = settings.getSkipIntroSeconds(forFolder: folder.name)
+        let skipOutro = settings.getSkipOutroSeconds(forFolder: folder.name)
+        
+        let alert = UIAlertController(
+            title: "文件夹设置",
+            message: "「\(folder.name)」的播放设置",
+            preferredStyle: .actionSheet
+        )
+        
+        alert.addAction(UIAlertAction(
+            title: "跳过开头：\(formatSeconds(skipIntro))",
+            style: .default
+        ) { [weak self] _ in
+            self?.showSkipIntroPicker()
+        })
+        
+        alert.addAction(UIAlertAction(
+            title: "跳过结尾：\(formatSeconds(skipOutro))",
+            style: .default
+        ) { [weak self] _ in
+            self?.showSkipOutroPicker()
+        })
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func formatSeconds(_ seconds: Int) -> String {
+        if seconds == 0 {
+            return "关闭"
+        } else if seconds < 60 {
+            return "\(seconds) 秒"
+        } else {
+            let minutes = seconds / 60
+            let remainingSeconds = seconds % 60
+            if remainingSeconds == 0 {
+                return "\(minutes) 分钟"
+            } else {
+                return "\(minutes) 分 \(remainingSeconds) 秒"
+            }
+        }
+    }
+    
+    private func showSkipIntroPicker() {
+        let options = [0, 5, 10, 15, 30, 60, 90, 120]
+        let currentValue = PlaybackStateManager.shared.getSkipIntroSeconds(forFolder: folder.name)
+        
+        let alert = UIAlertController(
+            title: "跳过开头",
+            message: "每次播放新曲目时自动跳过开头",
+            preferredStyle: .actionSheet
+        )
+        
+        for seconds in options {
+            let action = UIAlertAction(title: formatSeconds(seconds), style: .default) { [weak self] _ in
+                guard let self = self else { return }
+                PlaybackStateManager.shared.setSkipIntroSeconds(seconds, forFolder: self.folder.name)
+            }
+            if seconds == currentValue {
+                action.setValue(true, forKey: "checked")
+            }
+            alert.addAction(action)
+        }
+        
+        // 自定义输入
+        let customTitle = options.contains(currentValue) ? "自定义..." : "自定义 (\(formatSeconds(currentValue)))"
+        let customAction = UIAlertAction(title: customTitle, style: .default) { [weak self] _ in
+            self?.showCustomSkipIntroInput()
+        }
+        if !options.contains(currentValue) && currentValue > 0 {
+            customAction.setValue(true, forKey: "checked")
+        }
+        alert.addAction(customAction)
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func showCustomSkipIntroInput() {
+        let alert = UIAlertController(
+            title: "自定义跳过开头",
+            message: "请输入要跳过的秒数",
+            preferredStyle: .alert
+        )
+        
+        alert.addTextField { textField in
+            textField.placeholder = "秒数"
+            textField.keyboardType = .numberPad
+            let currentValue = PlaybackStateManager.shared.getSkipIntroSeconds(forFolder: self.folder.name)
+            if currentValue > 0 {
+                textField.text = "\(currentValue)"
+            }
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            if let text = alert.textFields?.first?.text,
+               let seconds = Int(text), seconds >= 0 {
+                PlaybackStateManager.shared.setSkipIntroSeconds(seconds, forFolder: self.folder.name)
+            }
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func showSkipOutroPicker() {
+        let options = [0, 5, 10, 15, 30, 60]
+        let currentValue = PlaybackStateManager.shared.getSkipOutroSeconds(forFolder: folder.name)
+        
+        let alert = UIAlertController(
+            title: "跳过结尾",
+            message: "曲目结尾前自动跳到下一曲",
+            preferredStyle: .actionSheet
+        )
+        
+        for seconds in options {
+            let action = UIAlertAction(title: formatSeconds(seconds), style: .default) { [weak self] _ in
+                guard let self = self else { return }
+                PlaybackStateManager.shared.setSkipOutroSeconds(seconds, forFolder: self.folder.name)
+            }
+            if seconds == currentValue {
+                action.setValue(true, forKey: "checked")
+            }
+            alert.addAction(action)
+        }
+        
+        // 自定义输入
+        let customTitle = options.contains(currentValue) ? "自定义..." : "自定义 (\(formatSeconds(currentValue)))"
+        let customAction = UIAlertAction(title: customTitle, style: .default) { [weak self] _ in
+            self?.showCustomSkipOutroInput()
+        }
+        if !options.contains(currentValue) && currentValue > 0 {
+            customAction.setValue(true, forKey: "checked")
+        }
+        alert.addAction(customAction)
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func showCustomSkipOutroInput() {
+        let alert = UIAlertController(
+            title: "自定义跳过结尾",
+            message: "请输入曲目结束前要跳过的秒数",
+            preferredStyle: .alert
+        )
+        
+        alert.addTextField { textField in
+            textField.placeholder = "秒数"
+            textField.keyboardType = .numberPad
+            let currentValue = PlaybackStateManager.shared.getSkipOutroSeconds(forFolder: self.folder.name)
+            if currentValue > 0 {
+                textField.text = "\(currentValue)"
+            }
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            if let text = alert.textFields?.first?.text,
+               let seconds = Int(text), seconds >= 0 {
+                PlaybackStateManager.shared.setSkipOutroSeconds(seconds, forFolder: self.folder.name)
+            }
+        })
+        
+        present(alert, animated: true)
+    }
 }
 
 // MARK: - UITableViewDataSource
@@ -134,7 +361,9 @@ extension TrackListViewController: UITableViewDataSource {
         let cell = tableView.dequeueReusableCell(withIdentifier: TrackCell.identifier, for: indexPath) as! TrackCell
         let track = tracks[indexPath.row]
         let isPlaying = AudioPlayerManager.shared.currentTrack == track
-        cell.configure(with: track, index: indexPath.row + 1, isPlaying: isPlaying)
+        let lastPlayedURL = PlaybackStateManager.shared.getLastPlayedTrack(forFolder: folder.name)
+        let isLastPlayed = !isPlaying && track.url == lastPlayedURL
+        cell.configure(with: track, index: indexPath.row + 1, isPlaying: isPlaying, isLastPlayed: isLastPlayed)
         return cell
     }
 }
@@ -245,6 +474,16 @@ final class TrackCell: UITableViewCell {
         return imageView
     }()
     
+    private let lastPlayedIndicator: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.image = UIImage(systemName: "bookmark.fill")
+        imageView.tintColor = .systemBlue
+        imageView.contentMode = .scaleAspectFit
+        imageView.isHidden = true
+        return imageView
+    }()
+    
     private let nameLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -274,6 +513,7 @@ final class TrackCell: UITableViewCell {
     private func setupUI() {
         contentView.addSubview(indexLabel)
         contentView.addSubview(playingIndicator)
+        contentView.addSubview(lastPlayedIndicator)
         contentView.addSubview(nameLabel)
         contentView.addSubview(durationLabel)
         
@@ -287,6 +527,11 @@ final class TrackCell: UITableViewCell {
             playingIndicator.widthAnchor.constraint(equalToConstant: 20),
             playingIndicator.heightAnchor.constraint(equalToConstant: 20),
             
+            lastPlayedIndicator.centerXAnchor.constraint(equalTo: indexLabel.centerXAnchor),
+            lastPlayedIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            lastPlayedIndicator.widthAnchor.constraint(equalToConstant: 16),
+            lastPlayedIndicator.heightAnchor.constraint(equalToConstant: 16),
+            
             nameLabel.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 12),
             nameLabel.trailingAnchor.constraint(equalTo: durationLabel.leadingAnchor, constant: -12),
             nameLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -297,15 +542,23 @@ final class TrackCell: UITableViewCell {
         ])
     }
     
-    func configure(with track: AudioTrack, index: Int, isPlaying: Bool) {
+    func configure(with track: AudioTrack, index: Int, isPlaying: Bool, isLastPlayed: Bool = false) {
         nameLabel.text = track.displayName
         durationLabel.text = track.duration.formattedTime
         indexLabel.text = "\(index)"
         
-        indexLabel.isHidden = isPlaying
+        // 显示状态：正在播放 > 上次播放 > 普通
+        indexLabel.isHidden = isPlaying || isLastPlayed
         playingIndicator.isHidden = !isPlaying
+        lastPlayedIndicator.isHidden = !isLastPlayed || isPlaying
         
-        nameLabel.textColor = isPlaying ? .systemOrange : .label
+        if isPlaying {
+            nameLabel.textColor = .systemOrange
+        } else if isLastPlayed {
+            nameLabel.textColor = .systemBlue
+        } else {
+            nameLabel.textColor = .label
+        }
     }
 }
 

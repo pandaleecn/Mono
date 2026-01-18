@@ -155,7 +155,8 @@ final class MiniPlayerView: UIView {
     }
     
     // MARK: - Update UI
-    private func updateUI() {
+    /// 刷新 mini player 显示内容（曲目名称、播放状态等）
+    func refreshUI() {
         let player = AudioPlayerManager.shared
         
         if let track = player.currentTrack {
@@ -167,6 +168,17 @@ final class MiniPlayerView: UIView {
         }
         
         updatePlayPauseButton(isPlaying: player.isPlaying)
+        
+        // 同步进度
+        let current = player.currentTime
+        let duration = player.duration
+        if duration > 0 && duration.isFinite {
+            updateProgress(current: current, duration: duration)
+        }
+    }
+    
+    private func updateUI() {
+        refreshUI()
     }
     
     private func updatePlayPauseButton(isPlaying: Bool) {

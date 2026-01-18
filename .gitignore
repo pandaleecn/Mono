@@ -3,3 +3,5 @@ MonoAndroid/app/build
 MonoAndroid/build
 MonoAndroid/.idea
 MonoAndroid/local.properties
+**/.DS_Store
+**/*.xcuserdatad
