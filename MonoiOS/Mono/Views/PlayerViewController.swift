@@ -130,6 +130,22 @@ final class PlayerViewController: UIViewController {
         return button
     }()
     
+    private lazy var sleepTimerButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // 使用等宽数字字体，避免数字变化时宽度跳动
+        button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
+        button.setTitleColor(.label, for: .normal)
+        button.setImage(UIImage(systemName: "moon.zzz", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14)), for: .normal)
+        button.tintColor = .label
+        button.backgroundColor = .systemGray5
+        button.layer.cornerRadius = 16
+        // 固定内容边距，避免大小变化
+        button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        button.addTarget(self, action: #selector(sleepTimerTapped), for: .touchUpInside)
+        return button
+    }()
+    
     private var isSeeking = false
     
     // MARK: - Lifecycle
@@ -137,9 +153,14 @@ final class PlayerViewController: UIViewController {
         super.viewDidLoad()
         setupUI()
         setupSliderActions()
+        setupSleepTimerObserver()
         
         AudioPlayerManager.shared.delegate = self
         updateUI()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -165,6 +186,7 @@ final class PlayerViewController: UIViewController {
         view.addSubview(skipForwardButton)
         view.addSubview(nextButton)
         view.addSubview(rateButton)
+        view.addSubview(sleepTimerButton)
         
         NSLayoutConstraint.activate([
             // 音乐图标
@@ -218,11 +240,16 @@ final class PlayerViewController: UIViewController {
             nextButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
             nextButton.leadingAnchor.constraint(equalTo: skipForwardButton.trailingAnchor, constant: 16),
             
-            // 倍速按钮
+            // 底部按钮
             rateButton.topAnchor.constraint(equalTo: playPauseButton.bottomAnchor, constant: 40),
-            rateButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            rateButton.trailingAnchor.constraint(equalTo: view.centerXAnchor, constant: -8),
             rateButton.widthAnchor.constraint(equalToConstant: 80),
-            rateButton.heightAnchor.constraint(equalToConstant: 32)
+            rateButton.heightAnchor.constraint(equalToConstant: 32),
+            
+            sleepTimerButton.topAnchor.constraint(equalTo: playPauseButton.bottomAnchor, constant: 40),
+            sleepTimerButton.leadingAnchor.constraint(equalTo: view.centerXAnchor, constant: 8),
+            sleepTimerButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 80),
+            sleepTimerButton.heightAnchor.constraint(equalToConstant: 32)
         ])
     }
     
@@ -275,6 +302,143 @@ final class PlayerViewController: UIViewController {
         isSeeking = false
     }
     
+    // MARK: - Sleep Timer
+    private func setupSleepTimerObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(sleepTimerDidChange),
+            name: .sleepTimerDidChange,
+            object: nil
+        )
+    }
+    
+    @objc private func sleepTimerTapped() {
+        showSleepTimerPicker()
+    }
+    
+    @objc private func sleepTimerDidChange() {
+        updateSleepTimerButton()
+    }
+    
+    private func showSleepTimerPicker() {
+        let player = AudioPlayerManager.shared
+        
+        let alert = UIAlertController(title: "睡眠定时器", message: "设定时间后自动停止播放", preferredStyle: .actionSheet)
+        
+        // 定时选项
+        let options: [(String, Int)] = [
+            ("15 分钟", 15),
+            ("30 分钟", 30),
+            ("45 分钟", 45),
+            ("60 分钟", 60),
+            ("90 分钟", 90)
+        ]
+        
+        for (title, minutes) in options {
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                player.setSleepTimer(minutes: minutes)
+            })
+        }
+        
+        // 自定义时间
+        alert.addAction(UIAlertAction(title: "自定义时间...", style: .default) { [weak self] _ in
+            self?.showCustomSleepTimerInput()
+        })
+        
+        // 播完本曲
+        let endOfTrackAction = UIAlertAction(title: "播完本曲", style: .default) { _ in
+            player.setSleepAtEndOfTrack()
+        }
+        if player.sleepAtEndOfTrack {
+            endOfTrackAction.setValue(true, forKey: "checked")
+        }
+        alert.addAction(endOfTrackAction)
+        
+        // 取消定时器（如果已激活）
+        if player.isSleepTimerActive {
+            alert.addAction(UIAlertAction(title: "取消定时器", style: .destructive) { _ in
+                player.cancelSleepTimer()
+            })
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = sleepTimerButton
+            popover.sourceRect = sleepTimerButton.bounds
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func showCustomSleepTimerInput() {
+        let alert = UIAlertController(title: "自定义定时", message: "请输入分钟数", preferredStyle: .alert)
+        
+        alert.addTextField { textField in
+            textField.placeholder = "分钟"
+            textField.keyboardType = .numberPad
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in
+            if let text = alert.textFields?.first?.text,
+               let minutes = Int(text), minutes > 0 {
+                AudioPlayerManager.shared.setSleepTimer(minutes: minutes)
+            }
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    /// 上一次显示的定时器状态，用于避免重复更新
+    private var lastSleepTimerState: String = ""
+    
+    private func updateSleepTimerButton() {
+        let player = AudioPlayerManager.shared
+        
+        var newState: String
+        var title: String
+        var isActive: Bool
+        
+        if player.sleepAtEndOfTrack {
+            newState = "endOfTrack"
+            title = "本曲"
+            isActive = true
+        } else if let remaining = player.sleepTimerRemaining, remaining > 0 {
+            let totalSeconds = Int(remaining)
+            let minutes = totalSeconds / 60
+            let seconds = totalSeconds % 60
+            // 使用固定格式，保持宽度一致
+            title = String(format: "%d:%02d", minutes, seconds)
+            newState = "timer_\(totalSeconds)"
+            isActive = true
+        } else {
+            newState = "inactive"
+            title = "定时"
+            isActive = false
+        }
+        
+        // 只在状态变化时更新 UI，避免闪动
+        // 对于倒计时，每秒都会变化，但我们只更新文字
+        let stateCategory = isActive ? "active" : "inactive"
+        if lastSleepTimerState != stateCategory {
+            lastSleepTimerState = stateCategory
+            
+            let iconName = isActive ? "moon.fill" : "moon.zzz"
+            let color: UIColor = isActive ? .systemOrange : .label
+            
+            sleepTimerButton.setImage(UIImage(systemName: iconName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 14)), for: .normal)
+            sleepTimerButton.tintColor = color
+            sleepTimerButton.setTitleColor(color, for: .normal)
+        }
+        
+        // 更新文字（使用 UIView.performWithoutAnimation 避免动画）
+        UIView.performWithoutAnimation {
+            sleepTimerButton.setTitle(title, for: .normal)
+            sleepTimerButton.layoutIfNeeded()
+        }
+    }
+    
     // MARK: - Rate Picker
     private func showRatePicker() {
         let alert = UIAlertController(title: "播放速度", message: nil, preferredStyle: .actionSheet)
@@ -319,6 +483,7 @@ final class PlayerViewController: UIViewController {
         
         updatePlayPauseButton(isPlaying: player.isPlaying)
         updateRateButton()
+        updateSleepTimerButton()
         updateProgress(current: player.currentTime, duration: player.duration)
     }
     

@@ -9,6 +9,11 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 
+// MARK: - 通知名称
+extension Notification.Name {
+    static let sleepTimerDidChange = Notification.Name("sleepTimerDidChange")
+}
+
 protocol AudioPlayerDelegate: AnyObject {
     func playerDidUpdateTime(_ currentTime: TimeInterval, duration: TimeInterval)
     func playerDidChangePlayingState(_ isPlaying: Bool)
@@ -33,6 +38,27 @@ final class AudioPlayerManager: NSObject {
     
     /// 记录被中断前是否正在播放，用于中断结束后恢复
     private var wasPlayingBeforeInterruption = false
+    
+    // MARK: - 睡眠定时器
+    private var sleepTimer: Timer?
+    private var sleepTimerEndDate: Date?
+    /// 睡眠定时器模式：播完当前曲目后停止
+    private(set) var sleepAtEndOfTrack = false
+    
+    /// 睡眠定时器剩余时间（秒），返回 nil 表示没有激活定时器
+    var sleepTimerRemaining: TimeInterval? {
+        guard let endDate = sleepTimerEndDate else { return nil }
+        let remaining = endDate.timeIntervalSinceNow
+        // 即使是负数也返回，让 checkSleepTimer 处理停止逻辑
+        return remaining
+    }
+    
+    /// 睡眠定时器是否激活
+    var isSleepTimerActive: Bool {
+        if sleepAtEndOfTrack { return true }
+        if let remaining = sleepTimerRemaining, remaining > 0 { return true }
+        return false
+    }
     
     var isPlaying: Bool {
         return player?.rate ?? 0 > 0
@@ -323,6 +349,68 @@ final class AudioPlayerManager: NSObject {
         seek(to: newTime)
     }
     
+    // MARK: - 睡眠定时器控制
+    
+    /// 设置睡眠定时器
+    /// - Parameter minutes: 分钟数，0 表示取消定时器
+    func setSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        
+        guard minutes > 0 else { return }
+        
+        sleepAtEndOfTrack = false
+        sleepTimerEndDate = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkSleepTimer()
+        }
+        
+        // 发送通知，UI 可以更新显示
+        NotificationCenter.default.post(name: .sleepTimerDidChange, object: nil)
+    }
+    
+    /// 设置播完当前曲目后停止
+    func setSleepAtEndOfTrack() {
+        cancelSleepTimer()
+        sleepAtEndOfTrack = true
+        NotificationCenter.default.post(name: .sleepTimerDidChange, object: nil)
+    }
+    
+    /// 取消睡眠定时器
+    func cancelSleepTimer() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        sleepTimerEndDate = nil
+        sleepAtEndOfTrack = false
+        NotificationCenter.default.post(name: .sleepTimerDidChange, object: nil)
+    }
+    
+    private func checkSleepTimer() {
+        guard let remaining = sleepTimerRemaining else {
+            return
+        }
+        
+        // 时间到，停止播放
+        if remaining <= 0 {
+            player?.volume = 1.0  // 恢复音量
+            pause()
+            cancelSleepTimer()
+            return
+        }
+        
+        // 最后 30 秒开始淡出音量
+        if remaining <= 30 && remaining > 0 {
+            let volume = Float(remaining / 30.0)
+            player?.volume = max(0.1, volume)  // 保持最小音量 0.1，避免完全静音
+        } else {
+            // 确保正常播放时音量正常
+            player?.volume = 1.0
+        }
+        
+        // 发送通知更新 UI
+        NotificationCenter.default.post(name: .sleepTimerDidChange, object: nil)
+    }
+    
     // MARK: - 时间观察
     /// 上次更新锁屏信息的时间，用于定期刷新（蓝牙同步）
     private var lastNowPlayingUpdateTime: TimeInterval = 0
@@ -388,6 +476,13 @@ final class AudioPlayerManager: NSObject {
         }
         
         delegate?.playerDidFinishTrack()
+        
+        // 如果设置了"播完本曲停止"，则停止播放
+        if sleepAtEndOfTrack {
+            cancelSleepTimer()
+            delegate?.playerDidChangePlayingState(false)
+            return
+        }
         
         // 自动播放下一曲
         if currentIndex < currentPlaylist.count - 1 {
